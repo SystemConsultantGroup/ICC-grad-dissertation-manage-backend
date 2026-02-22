@@ -70,9 +70,9 @@ jobs:
       - name: Config Repo 변경사항 푸시
         run: |
           cd config-repo
-          git config --global user.email "wefwef12e@naver.com"
-          git config --global user.name "hynseok"
-          git commit -am "Update image tag"
+          git config --global user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"
+          git config --global user.name "${{ github.actor }}"
+          git commit -am "Deploy: ${{ github.event.head_commit.message }} (${{ env.dockerimage_tag }})"
           git push -u origin main
       - name: --------------- Clean Up ---------------
         run: echo "Clean Up"
