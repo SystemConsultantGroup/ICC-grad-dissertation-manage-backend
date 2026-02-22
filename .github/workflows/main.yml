@@ -5,7 +5,7 @@ on:
     branches: ["main"]
 env:
   dockerimage_tag: ${{ github.sha }}
-  dockerimage_name: skkuscg/icc-grad-dissertation-manage-backend
+  dockerimage_name: scgskku/icc-grad-dissertation-manage-backend
 jobs:
   build:
     runs-on: ubuntu-latest
