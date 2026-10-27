@@ -2280,7 +2280,7 @@ export class StudentsService {
       await this.prismaService.user.delete({
         where: {
           id: studentId,
-          type: UserType.STUDENT,
+          type: { in: [UserType.STUDENT, UserType.PHD] },
         },
       });
     } catch (error) {
