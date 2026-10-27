@@ -2253,7 +2253,7 @@ export class StudentsService {
     // cascade로 삭제되는 연관된 데이터들 : Achivements, Process, Reviewers, ThesisInfos, Reviews, ThesisFiles
     try {
       await this.prismaService.user.deleteMany({
-        where: { type: UserType.STUDENT },
+        where: { type: { in: [UserType.STUDENT, UserType.PHD] } },
       });
     } catch (error) {
       console.log(error);
@@ -2266,7 +2266,7 @@ export class StudentsService {
     const student = await this.prismaService.user.findUnique({
       where: {
         id: studentId,
-        type: UserType.STUDENT,
+        type: { in: [UserType.STUDENT, UserType.PHD] },
         deletedAt: null,
       },
     });
