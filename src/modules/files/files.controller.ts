@@ -1,10 +1,23 @@
-import { Controller, Get, Param, Post, UploadedFile, UseGuards, Response, Delete, ParseUUIDPipe } from "@nestjs/common";
+import {
+  Controller,
+  Get,
+  Param,
+  Post,
+  Put,
+  UploadedFile,
+  UseGuards,
+  Response,
+  Delete,
+  ParseUUIDPipe,
+} from "@nestjs/common";
 import { FilesService } from "./files.service";
 import { JwtGuard } from "../auth/guards/jwt.guard";
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
   ApiInternalServerErrorResponse,
+  ApiNotFoundResponse,
+  ApiOkResponse,
   ApiOperation,
   ApiResponse,
   ApiTags,
@@ -12,7 +25,9 @@ import {
 import { ApiFile } from "./decorators/api-file.decorator";
 import { CommonResponseDto } from "../../common/dtos/common-response.dto";
 import { UseUserTypeGuard } from "../auth/decorators/user-type-guard.decorator";
-import { UserType } from "@prisma/client";
+import { User, UserType } from "@prisma/client";
+import { CurrentUser } from "src/common/decorators/current-user.decorator";
+import { ReuploadTargetListDto } from "./dtos/reupload-target.dto";
 
 @ApiTags("파일 API")
 @ApiBearerAuth("access-token")
@@ -67,6 +82,39 @@ export class FilesController {
 
     res.setHeader("Content-Disposition", `attachment; filename=${encodeURI(fileName)}`);
     stream.pipe(res);
+  }
+
+  @Get("reupload/me")
+  @UseUserTypeGuard([UserType.STUDENT])
+  @ApiOperation({
+    summary: "재업로드 대상 파일 조회 (학생)",
+    description: "본인이 제출한 논문·발표 파일별로 저장소 보관 상태(MISSING/REUPLOADED/OK)를 조회한다.",
+  })
+  @ApiOkResponse({ type: ReuploadTargetListDto })
+  async getMyReuploadTargets(@CurrentUser() user: User) {
+    const items = await this.filesService.getMyReuploadTargets(user);
+
+    return new CommonResponseDto({ items });
+  }
+
+  @Put("reupload/:uuid")
+  @UseUserTypeGuard([UserType.STUDENT])
+  @ApiOperation({
+    summary: "유실된 제출 파일 재업로드 (학생)",
+    description: "기존 파일과 같은 uuid 로 저장소에만 다시 올린다. DB 의 제출 시각·파일명은 바뀌지 않는다.",
+  })
+  @ApiFile("file")
+  @ApiOkResponse({ type: CommonResponseDto })
+  @ApiBadRequestResponse({ description: "정상 보관 중인 파일이거나 파일 형식이 다름" })
+  @ApiNotFoundResponse({ description: "본인이 제출한 파일이 아님" })
+  async reuploadMyFile(
+    @CurrentUser() user: User,
+    @Param("uuid", ParseUUIDPipe) uuid: string,
+    @UploadedFile() uploadedFile: Express.Multer.File
+  ) {
+    const result = await this.filesService.reuploadMyFile(user, uuid, uploadedFile);
+
+    return new CommonResponseDto(result);
   }
 
   @Get(":id")

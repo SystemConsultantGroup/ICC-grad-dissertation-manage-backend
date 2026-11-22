@@ -66,12 +66,27 @@ export class ReviewsService {
     return fileName;
   }
 
+  /**
+   * 심사 PDF에 들어갈 서명 이미지가 저장소에 실제로 있는지 미리 확인한다.
+   * 없으면 PDF 생성 도중 실패하는 대신, 교수에게 서명 재등록을 안내하는 오류를 돌려준다.
+   */
+  private async assertSignatureAvailable(signId: string | null | undefined) {
+    if (!signId) return;
+    const stat = await this.minioClientService.statFile(signId);
+    if (!stat) {
+      throw new BadRequestException(
+        "등록된 서명 이미지를 찾을 수 없습니다. [회원정보 수정]에서 서명을 다시 등록한 뒤 심사를 제출해 주세요."
+      );
+    }
+  }
+
   async buildResultPdf(reviewId, replacer, isMain, studentName: string) {
     const fileName = (isMain ? "" : "예비") + "심사결과보고서_양식.html";
     const filePath = path.join("resources", "format", fileName);
     try {
-      return new Promise((resolve) => {
-        readFile(filePath, "utf8", async (err, formatHtml) => {
+      return new Promise((resolve, reject) => {
+        // async 콜백에서 던진 예외는 Promise 밖으로 새어 나가 프로세스를 종료시키므로 reject 로 넘긴다.
+        const render = async (err: NodeJS.ErrnoException | null, formatHtml: string) => {
           if (err) throw new InternalServerErrorException("reading format html file failed: " + filePath);
           const replacerKeys = Object.keys(replacer);
           if (isMain) {
@@ -296,6 +311,9 @@ export class ReviewsService {
               },
             })
           );
+        };
+        readFile(filePath, "utf8", (err, formatHtml) => {
+          render(err, formatHtml).catch(reject);
         });
       });
     } catch (error) {
@@ -308,8 +326,9 @@ export class ReviewsService {
     const fileName = (isMain ? "" : "예비") + "심사보고서_양식.html";
     const filePath = path.join("resources", "format", fileName);
     try {
-      return new Promise((resolve) => {
-        readFile(filePath, "utf8", async (err, formatHtml) => {
+      return new Promise((resolve, reject) => {
+        // async 콜백에서 던진 예외는 Promise 밖으로 새어 나가 프로세스를 종료시키므로 reject 로 넘긴다.
+        const render = async (err: NodeJS.ErrnoException | null, formatHtml: string) => {
           if (err) throw new InternalServerErrorException("reading format html file failed: " + filePath);
           const replacerKeys = Object.keys(replacer);
           for (const key of replacerKeys) {
@@ -354,6 +373,9 @@ export class ReviewsService {
               },
             })
           );
+        };
+        readFile(filePath, "utf8", (err, formatHtml) => {
+          render(err, formatHtml).catch(reject);
         });
       });
     } catch (error) {
@@ -739,6 +761,13 @@ export class ReviewsService {
       if (!foundFile) throw new NotFoundException("존재하지 않는 심사파일입니다.");
     }
     const isMain = foundReview.thesisInfo.stage == Stage.MAIN ? true : false;
+
+    const isDecided = (status?: Status) => status == Status.PASS || status == Status.FAIL;
+    const willBuildPdf =
+      !fileUUID &&
+      isDecided(updateReviewDto.contentStatus) &&
+      (!isMain || isDecided(updateReviewDto.presentationStatus));
+    if (willBuildPdf) await this.assertSignatureAvailable(foundReview.reviewer?.signId);
 
     try {
       const review = await this.prismaService.$transaction(async (tx) => {
@@ -1195,6 +1224,11 @@ export class ReviewsService {
       });
       if (!foundFile) throw new NotFoundException("존재하지 않는 심사파일입니다.");
     }
+
+    const willBuildPdf =
+      !fileUUID &&
+      (updateReviewFinalDto.contentStatus == Status.PASS || updateReviewFinalDto.contentStatus == Status.FAIL);
+    if (willBuildPdf) await this.assertSignatureAvailable(foundReview.reviewer?.signId);
 
     try {
       const review = await this.prismaService.$transaction(async (tx) => {
