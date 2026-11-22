@@ -14,6 +14,7 @@ import { ConfigModule, ConfigService } from "@nestjs/config";
         useSSL: true, //tls나 ssl 적용 필요
         accessKey: configService.get("MINIO_ACCESS_KEY"),
         secretKey: configService.get("MINIO_SECRET_KEY"),
+        region: configService.get("MINIO_REGION"),
       }),
     }),
   ],
