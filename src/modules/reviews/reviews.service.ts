@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
 import { InternalServerErrorException, NotFoundException } from "@nestjs/common/exceptions";
 import { Role, Stage, Status, Summary, User, UserType } from "@prisma/client";
-import { readFile } from "fs";
+import { readFile } from "fs/promises";
 import * as Zip from "jszip";
 import * as path from "path";
 import { getCurrentTime } from "src/common/utils/date.util";
@@ -66,21 +66,32 @@ export class ReviewsService {
     return fileName;
   }
 
+  private async buildSignImageSrc(signId: string | null) {
+    if (!signId) return "";
+    try {
+      const readable = await this.minioClientService.getFile(signId);
+      const buf = await readableToBuffer(readable);
+      return `data:image/png;base64, ${buf.toString("base64")}`;
+    } catch (error) {
+      // 서명 파일이 스토리지에 없더라도 심사 저장은 막지 않고 서명 칸을 빈칸으로 둔다.
+      console.warn(`서명 파일을 불러오지 못해 빈칸으로 처리합니다. signId=${signId}`, error);
+      return "";
+    }
+  }
+
   async buildResultPdf(reviewId, replacer, isMain, studentName: string) {
     const fileName = (isMain ? "" : "예비") + "심사결과보고서_양식.html";
     const filePath = path.join("resources", "format", fileName);
     try {
-      return new Promise((resolve) => {
-        readFile(filePath, "utf8", async (err, formatHtml) => {
-          if (err) throw new InternalServerErrorException("reading format html file failed: " + filePath);
-          const replacerKeys = Object.keys(replacer);
-          if (isMain) {
-            for (const key of replacerKeys) {
-              if (key == "$심사위원장") {
-                for (const slot of replacer[key]) {
-                  formatHtml = formatHtml.replace(
-                    "$row",
-                    `
+      let formatHtml = await readFile(filePath, "utf8");
+      const replacerKeys = Object.keys(replacer);
+      if (isMain) {
+        for (const key of replacerKeys) {
+          if (key == "$심사위원장") {
+            for (const slot of replacer[key]) {
+              formatHtml = formatHtml.replace(
+                "$row",
+                `
                   <tr class="row_1">
                     <td class="label_1">
                         <span>심사위원장</span><br>
@@ -103,14 +114,14 @@ export class ReviewsService {
                     </td>
                   </tr>
                 `
-                  );
-                  for (const key of Object.keys(slot)) formatHtml = formatHtml.replace(key, slot[key]);
-                }
-              } else if (key == "$심사위원") {
-                for (const slot of replacer[key]) {
-                  formatHtml = formatHtml.replace(
-                    "$row",
-                    `
+              );
+              for (const key of Object.keys(slot)) formatHtml = formatHtml.replace(key, slot[key]);
+            }
+          } else if (key == "$심사위원") {
+            for (const slot of replacer[key]) {
+              formatHtml = formatHtml.replace(
+                "$row",
+                `
                     <tr class="row_1">
                       <td class="label_1">
                           <span>심사위원</span><br>
@@ -133,14 +144,14 @@ export class ReviewsService {
                       </td>
                   </tr>
                 `
-                  );
-                  for (const key of Object.keys(slot)) formatHtml = formatHtml.replace(key, slot[key]);
-                }
-              } else if (key == "$지도교수") {
-                for (const slot of replacer[key]) {
-                  formatHtml = formatHtml.replace(
-                    "$row",
-                    `
+              );
+              for (const key of Object.keys(slot)) formatHtml = formatHtml.replace(key, slot[key]);
+            }
+          } else if (key == "$지도교수") {
+            for (const slot of replacer[key]) {
+              formatHtml = formatHtml.replace(
+                "$row",
+                `
                     <tr class="row_1">
                       <td class="label_1">
                           <span>지도교수</span><br>
@@ -163,28 +174,22 @@ export class ReviewsService {
                       </td>
                   </tr>
                 `
-                  );
-                  for (const key of Object.keys(slot)) formatHtml = formatHtml.replace(key, slot[key]);
-                }
-              } else if (key == "$서명") {
-                if (replacer[key]) {
-                  const readable = await this.minioClientService.getFile(replacer[key]);
-                  const buf = await readableToBuffer(readable);
-                  formatHtml = formatHtml.replace(key, `data:image/png;base64, ${buf.toString("base64")}`);
-                } else {
-                  formatHtml = formatHtml.replace(key, "");
-                }
-              } else {
-                formatHtml = formatHtml.replace(key, replacer[key]);
-              }
+              );
+              for (const key of Object.keys(slot)) formatHtml = formatHtml.replace(key, slot[key]);
             }
+          } else if (key == "$서명") {
+            formatHtml = formatHtml.replace(key, await this.buildSignImageSrc(replacer[key]));
           } else {
-            for (const key of replacerKeys) {
-              if (key == "$심사위원장") {
-                for (const slot of replacer[key]) {
-                  formatHtml = formatHtml.replace(
-                    "$row",
-                    `
+            formatHtml = formatHtml.replace(key, replacer[key]);
+          }
+        }
+      } else {
+        for (const key of replacerKeys) {
+          if (key == "$심사위원장") {
+            for (const slot of replacer[key]) {
+              formatHtml = formatHtml.replace(
+                "$row",
+                `
                   <tr class="row_1">
                     <td class="label_1">
                         <span>심사위원장</span><br>
@@ -201,14 +206,14 @@ export class ReviewsService {
                     </td>
                   </tr>
                 `
-                  );
-                  for (const key of Object.keys(slot)) formatHtml = formatHtml.replace(key, slot[key]);
-                }
-              } else if (key == "$심사위원") {
-                for (const slot of replacer[key]) {
-                  formatHtml = formatHtml.replace(
-                    "$row",
-                    `
+              );
+              for (const key of Object.keys(slot)) formatHtml = formatHtml.replace(key, slot[key]);
+            }
+          } else if (key == "$심사위원") {
+            for (const slot of replacer[key]) {
+              formatHtml = formatHtml.replace(
+                "$row",
+                `
                     <tr class="row_1">
                       <td class="label_1">
                           <span>심사위원</span><br>
@@ -225,14 +230,14 @@ export class ReviewsService {
                       </td>
                   </tr>
                 `
-                  );
-                  for (const key of Object.keys(slot)) formatHtml = formatHtml.replace(key, slot[key]);
-                }
-              } else if (key == "$지도교수") {
-                for (const slot of replacer[key]) {
-                  formatHtml = formatHtml.replace(
-                    "$row",
-                    `
+              );
+              for (const key of Object.keys(slot)) formatHtml = formatHtml.replace(key, slot[key]);
+            }
+          } else if (key == "$지도교수") {
+            for (const slot of replacer[key]) {
+              formatHtml = formatHtml.replace(
+                "$row",
+                `
                     <tr class="row_1">
                       <td class="label_1">
                           <span>지도교수</span><br>
@@ -249,54 +254,44 @@ export class ReviewsService {
                       </td>
                   </tr>
                 `
-                  );
-                  for (const key of Object.keys(slot)) formatHtml = formatHtml.replace(key, slot[key]);
-                }
-              } else if (key == "$서명") {
-                if (replacer[key]) {
-                  const readable = await this.minioClientService.getFile(replacer[key]);
-                  const buf = await readableToBuffer(readable);
-                  formatHtml = formatHtml.replace(key, `data:image/png;base64, ${buf.toString("base64")}`);
-                } else {
-                  formatHtml = formatHtml.replace(key, "");
-                }
-              } else {
-                formatHtml = formatHtml.replace(key, replacer[key]);
-              }
+              );
+              for (const key of Object.keys(slot)) formatHtml = formatHtml.replace(key, slot[key]);
             }
-            formatHtml = formatHtml.replaceAll("$row", "");
+          } else if (key == "$서명") {
+            formatHtml = formatHtml.replace(key, await this.buildSignImageSrc(replacer[key]));
+          } else {
+            formatHtml = formatHtml.replace(key, replacer[key]);
           }
+        }
+        formatHtml = formatHtml.replaceAll("$row", "");
+      }
 
-          for (let i = 0; i < 2; i++) formatHtml = formatHtml.replaceAll("$row", "");
+      for (let i = 0; i < 2; i++) formatHtml = formatHtml.replaceAll("$row", "");
 
-          const key = v1();
-          const createdAt = new Date();
-          await this.kafkaProducer.sendMessage("pdf-topic-dev", JSON.stringify(reviewId), formatHtml, {
-            originalName: studentName + "_" + fileName.replace("_양식.html", ".pdf"),
-            uuid: key,
-          });
-          // await convertHTMLToPDF(formatHtml, async (pdf) => {
-          //   if (err) throw new InternalServerErrorException("Creating PDF Buffer failed!");
-          //   await this.minioClientService.uploadFile(
-          //     key,
-          //     pdf,
-          //     Buffer.byteLength(pdf),
-          //     createdAt,
-          //     reviewId.toString() + "_" + fileName.replace(".html", ".pdf"),
-          //     "application/pdf"
-          //   );
-          // });
-          return resolve(
-            await this.prismaService.file.create({
-              data: {
-                name: studentName + "_" + fileName.replace("_양식.html", ".pdf"),
-                mimeType: "application/pdf",
-                uuid: key,
-                createdAt: createdAt,
-              },
-            })
-          );
-        });
+      const key = v1();
+      const createdAt = new Date();
+      await this.kafkaProducer.sendMessage("pdf-topic-dev", JSON.stringify(reviewId), formatHtml, {
+        originalName: studentName + "_" + fileName.replace("_양식.html", ".pdf"),
+        uuid: key,
+      });
+      // await convertHTMLToPDF(formatHtml, async (pdf) => {
+      //   if (err) throw new InternalServerErrorException("Creating PDF Buffer failed!");
+      //   await this.minioClientService.uploadFile(
+      //     key,
+      //     pdf,
+      //     Buffer.byteLength(pdf),
+      //     createdAt,
+      //     reviewId.toString() + "_" + fileName.replace(".html", ".pdf"),
+      //     "application/pdf"
+      //   );
+      // });
+      return await this.prismaService.file.create({
+        data: {
+          name: studentName + "_" + fileName.replace("_양식.html", ".pdf"),
+          mimeType: "application/pdf",
+          uuid: key,
+          createdAt: createdAt,
+        },
       });
     } catch (error) {
       console.log(error);
@@ -308,53 +303,41 @@ export class ReviewsService {
     const fileName = (isMain ? "" : "예비") + "심사보고서_양식.html";
     const filePath = path.join("resources", "format", fileName);
     try {
-      return new Promise((resolve) => {
-        readFile(filePath, "utf8", async (err, formatHtml) => {
-          if (err) throw new InternalServerErrorException("reading format html file failed: " + filePath);
-          const replacerKeys = Object.keys(replacer);
-          for (const key of replacerKeys) {
-            if (key == "$서명") {
-              if (replacer[key]) {
-                const readable = await this.minioClientService.getFile(replacer[key]);
-                const buf = await readableToBuffer(readable);
-                formatHtml = formatHtml.replace(key, `data:image/png;base64, ${buf.toString("base64")}`);
-              } else {
-                formatHtml = formatHtml.replace(key, "");
-              }
-            } else {
-              formatHtml = formatHtml.replaceAll(key, replacer[key]);
-            }
-          }
+      let formatHtml = await readFile(filePath, "utf8");
+      const replacerKeys = Object.keys(replacer);
+      for (const key of replacerKeys) {
+        if (key == "$서명") {
+          formatHtml = formatHtml.replace(key, await this.buildSignImageSrc(replacer[key]));
+        } else {
+          formatHtml = formatHtml.replaceAll(key, replacer[key]);
+        }
+      }
 
-          const key = v1();
-          const createdAt = new Date();
-          // await convertHTMLToPDF(formatHtml, async (pdf) => {
-          //   if (err) throw new InternalServerErrorException("Creating PDF Buffer failed!");
-          //   await this.minioClientService.uploadFile(
-          //     key,
-          //     pdf,
-          //     Buffer.byteLength(pdf),
-          //     createdAt,
-          //     reviewId.toString() + "_" + fileName.replace(".html", ".pdf"),
-          //     "application/pdf"
-          //   );
-          // });
-          await this.kafkaProducer.sendMessage("pdf-topic-dev", JSON.stringify(reviewId), formatHtml, {
-            originalName: studentName + "_" + professorName + "_" + fileName.replace("_양식.html", ".pdf"),
-            uuid: key,
-          });
+      const key = v1();
+      const createdAt = new Date();
+      // await convertHTMLToPDF(formatHtml, async (pdf) => {
+      //   if (err) throw new InternalServerErrorException("Creating PDF Buffer failed!");
+      //   await this.minioClientService.uploadFile(
+      //     key,
+      //     pdf,
+      //     Buffer.byteLength(pdf),
+      //     createdAt,
+      //     reviewId.toString() + "_" + fileName.replace(".html", ".pdf"),
+      //     "application/pdf"
+      //   );
+      // });
+      await this.kafkaProducer.sendMessage("pdf-topic-dev", JSON.stringify(reviewId), formatHtml, {
+        originalName: studentName + "_" + professorName + "_" + fileName.replace("_양식.html", ".pdf"),
+        uuid: key,
+      });
 
-          return resolve(
-            await this.prismaService.file.create({
-              data: {
-                name: studentName + "_" + professorName + "_" + fileName.replace("_양식.html", ".pdf"),
-                mimeType: "application/pdf",
-                uuid: key,
-                createdAt: createdAt,
-              },
-            })
-          );
-        });
+      return await this.prismaService.file.create({
+        data: {
+          name: studentName + "_" + professorName + "_" + fileName.replace("_양식.html", ".pdf"),
+          mimeType: "application/pdf",
+          uuid: key,
+          createdAt: createdAt,
+        },
       });
     } catch (error) {
       console.log(error);
@@ -1283,7 +1266,8 @@ export class ReviewsService {
                 for (const reviewer of updatedReview.thesisInfo.process.reviewers) {
                   if (singleReview.reviewerId == reviewer.reviewerId) {
                     if (reviewer.role == Role.COMMITTEE_CHAIR) {
-                      if (!singleReview.isFinal) { // 본심사에서도 최종판정 여부가 아닌 개별심사 여부를 원하시는 듯.
+                      if (!singleReview.isFinal) {
+                        // 본심사에서도 최종판정 여부가 아닌 개별심사 여부를 원하시는 듯.
                         replacer["$심사위원장"].push({
                           $성명: singleReview.reviewer.name,
                           "$내용:합격": singleReview.contentStatus === "PASS" ? "O" : "",
@@ -1339,7 +1323,8 @@ export class ReviewsService {
                 for (const reviewer of updatedReview.thesisInfo.process.reviewers) {
                   if (singleReview.reviewerId == reviewer.reviewerId) {
                     if (reviewer.role == Role.COMMITTEE_CHAIR) {
-                      if (!singleReview.isFinal) { // 예비심사에서 최종판정 여부가 아닌, 개별심사위원 합불여부를 표시해달라고 요청하심.
+                      if (!singleReview.isFinal) {
+                        // 예비심사에서 최종판정 여부가 아닌, 개별심사위원 합불여부를 표시해달라고 요청하심.
                         replacer["$심사위원장"].push({
                           $성명: singleReview.reviewer.name,
                           $합격: singleReview.contentStatus === "PASS" ? "O" : "",
@@ -2071,21 +2056,18 @@ export class ReviewsService {
     for await (const result of results) {
       for await (const review of result.reviews) {
         if (review.file) {
-          const readable = await this.minioClientService.getFile(review.file.uuid);
-          const readStream = new Promise((resolve) => {
-            const bufs = [];
-            readable.on("data", (data) => {
-              bufs.push(data);
-            });
-            readable.resume().on("end", () => {
-              let filename;
-              if (review.isFinal) filename = result.id.toString() + "_심사결과보고서_" + review.reviewer.name + ".pdf";
-              else filename = result.id.toString() + "_심사보고서_" + review.reviewer.name + ".pdf";
-              zip.file(filename, Buffer.concat(bufs));
-              resolve(null);
-            });
-          });
-          await readStream;
+          let buf: Buffer;
+          try {
+            const readable = await this.minioClientService.getFile(review.file.uuid);
+            buf = await readableToBuffer(readable);
+          } catch (error) {
+            // 스토리지에 없는 파일은 건너뛰고 나머지 파일로 zip을 만든다.
+            console.warn(`심사 보고서 파일을 불러오지 못해 zip에서 제외합니다. fileUuid=${review.file.uuid}`, error);
+            continue;
+          }
+          const reportType = review.isFinal ? "_심사결과보고서_" : "_심사보고서_";
+          const filename = result.id.toString() + reportType + review.reviewer.name + ".pdf";
+          zip.file(filename, buf);
         }
       }
     }
