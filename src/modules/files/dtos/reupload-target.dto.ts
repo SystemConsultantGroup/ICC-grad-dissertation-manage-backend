@@ -112,3 +112,60 @@ export class AdminReuploadStatusDto {
   @ApiProperty({ type: [AdminReuploadStudentDto] })
   items: AdminReuploadStudentDto[];
 }
+
+export enum SignReuploadStatus {
+  /** 서명 파일이 연결돼 있지만 저장소에 없어 다시 올려야 하는 상태 */
+  MISSING = "MISSING",
+  /** 저장소에 서명 파일이 있는 상태 (장애 이후 새로 올린 서명) */
+  UPLOADED = "UPLOADED",
+  /** 서명을 한 번도 등록하지 않은 상태 */
+  NONE = "NONE",
+}
+
+export class AdminSignReuploadProfessorDto {
+  @ApiProperty({ description: "교수 user id" })
+  professorId: number;
+
+  @ApiProperty({ description: "로그인 아이디" })
+  loginId: string;
+
+  @ApiProperty({ description: "이름" })
+  name: string;
+
+  @ApiProperty({ description: "학과", nullable: true })
+  department: string | null;
+
+  @ApiProperty({ description: "이메일", nullable: true })
+  email: string | null;
+
+  @ApiProperty({ description: "서명 상태", enum: SignReuploadStatus })
+  status: SignReuploadStatus;
+
+  @ApiProperty({ description: "현재 연결된 서명 파일 업로드 시각", nullable: true })
+  signUploadedAt: Date | null;
+
+  @ApiProperty({ description: "심사를 맡고 있는 학생 수 (지도교수·심사위원 포함)" })
+  assignedStudentCount: number;
+}
+
+export class AdminSignReuploadSummaryDto {
+  @ApiProperty({ description: "교수 수" })
+  professorCount: number;
+
+  @ApiProperty({ description: "서명을 다시 올려야 하는 교수 수" })
+  missingCount: number;
+
+  @ApiProperty({ description: "서명이 저장소에 있는 교수 수" })
+  uploadedCount: number;
+
+  @ApiProperty({ description: "서명을 등록한 적 없는 교수 수" })
+  noneCount: number;
+}
+
+export class AdminSignReuploadStatusDto {
+  @ApiProperty({ type: AdminSignReuploadSummaryDto })
+  summary: AdminSignReuploadSummaryDto;
+
+  @ApiProperty({ type: [AdminSignReuploadProfessorDto] })
+  items: AdminSignReuploadProfessorDto[];
+}

@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, InternalServerErrorException, NotFoundException } from "@nestjs/common";
-import { User } from "@prisma/client";
+import { User, UserType } from "@prisma/client";
 import * as path from "path";
 import * as fs from "fs";
 import { PrismaService } from "src/config/database/prisma.service";
@@ -9,8 +9,11 @@ import { FileDto } from "./dtos/file.dto";
 import {
   AdminReuploadStatusDto,
   AdminReuploadStudentDto,
+  AdminSignReuploadProfessorDto,
+  AdminSignReuploadStatusDto,
   ReuploadStatus,
   ReuploadTargetDto,
+  SignReuploadStatus,
 } from "./dtos/reupload-target.dto";
 
 // 저장소 객체 메타데이터 키 (statObject 는 소문자 키로 돌려준다)
@@ -209,6 +212,69 @@ export class FilesService {
         completedStudentCount: affected.filter((s) => s.missingCount === 0).length,
         missingFileCount: items.reduce((sum, s) => sum + s.missingCount, 0),
         reuploadedFileCount: items.reduce((sum, s) => sum + s.reuploadedCount, 0),
+      },
+      items,
+    };
+  }
+
+  /**
+   * 관리자용 교수 서명(도장) 재업로드 현황.
+   * 장애로 저장소 파일이 모두 유실됐으므로, 연결된 서명 파일이 저장소에 있으면 장애 이후 새로 올린 것이다.
+   * 교수가 계정 정보에서 서명을 다시 올리면 새 파일(uuid)로 바뀌므로 메타데이터는 따로 보지 않는다.
+   */
+  async getSignReuploadStatusForAdmin(): Promise<AdminSignReuploadStatusDto> {
+    const activeStudent = { student: { deletedAt: null } };
+    const [professors, existingKeys] = await Promise.all([
+      this.prismaService.user.findMany({
+        where: { type: UserType.PROFESSOR, deletedAt: null },
+        include: {
+          department: true,
+          signFile: true,
+          reviewers: { where: { process: activeStudent }, select: { processId: true } },
+          headReviewProcesses: { where: activeStudent, select: { id: true } },
+        },
+      }),
+      this.minioClientService.listFileKeys(),
+    ]);
+
+    const items: AdminSignReuploadProfessorDto[] = professors.map((professor) => {
+      const status = !professor.signId
+        ? SignReuploadStatus.NONE
+        : existingKeys.has(professor.signId)
+          ? SignReuploadStatus.UPLOADED
+          : SignReuploadStatus.MISSING;
+      const processIds = new Set([
+        ...professor.reviewers.map((reviewer) => reviewer.processId),
+        ...professor.headReviewProcesses.map((process) => process.id),
+      ]);
+
+      return {
+        professorId: professor.id,
+        loginId: professor.loginId,
+        name: professor.name,
+        department: professor.department?.name ?? null,
+        email: professor.email,
+        status,
+        signUploadedAt: status === SignReuploadStatus.UPLOADED ? professor.signFile?.createdAt ?? null : null,
+        assignedStudentCount: processIds.size,
+      };
+    });
+
+    const STATUS_ORDER = [SignReuploadStatus.MISSING, SignReuploadStatus.NONE, SignReuploadStatus.UPLOADED];
+    items.sort(
+      (a, b) =>
+        STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status) ||
+        b.assignedStudentCount - a.assignedStudentCount ||
+        a.name.localeCompare(b.name)
+    );
+    const countOf = (status: SignReuploadStatus) => items.filter((item) => item.status === status).length;
+
+    return {
+      summary: {
+        professorCount: items.length,
+        missingCount: countOf(SignReuploadStatus.MISSING),
+        uploadedCount: countOf(SignReuploadStatus.UPLOADED),
+        noneCount: countOf(SignReuploadStatus.NONE),
       },
       items,
     };

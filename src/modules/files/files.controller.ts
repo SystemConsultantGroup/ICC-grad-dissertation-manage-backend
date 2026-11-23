@@ -27,7 +27,7 @@ import { CommonResponseDto } from "../../common/dtos/common-response.dto";
 import { UseUserTypeGuard } from "../auth/decorators/user-type-guard.decorator";
 import { User, UserType } from "@prisma/client";
 import { CurrentUser } from "src/common/decorators/current-user.decorator";
-import { AdminReuploadStatusDto, ReuploadTargetListDto } from "./dtos/reupload-target.dto";
+import { AdminReuploadStatusDto, AdminSignReuploadStatusDto, ReuploadTargetListDto } from "./dtos/reupload-target.dto";
 
 @ApiTags("파일 API")
 @ApiBearerAuth("access-token")
@@ -108,6 +108,20 @@ export class FilesController {
   @ApiOkResponse({ type: AdminReuploadStatusDto })
   async getReuploadStatusForAdmin() {
     const status = await this.filesService.getReuploadStatusForAdmin();
+
+    return new CommonResponseDto(status);
+  }
+
+  @Get("reupload/signs")
+  @UseUserTypeGuard([UserType.ADMIN])
+  @ApiOperation({
+    summary: "교수 서명(도장) 재업로드 현황 조회 (관리자)",
+    description:
+      "교수별 서명 파일이 저장소에 있는지(UPLOADED), 다시 올려야 하는지(MISSING), 등록한 적 없는지(NONE) 조회한다.",
+  })
+  @ApiOkResponse({ type: AdminSignReuploadStatusDto })
+  async getSignReuploadStatusForAdmin() {
+    const status = await this.filesService.getSignReuploadStatusForAdmin();
 
     return new CommonResponseDto(status);
   }
