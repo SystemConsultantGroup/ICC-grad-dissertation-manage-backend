@@ -3,6 +3,8 @@ import { ConfigService } from "@nestjs/config";
 import * as Minio from "minio";
 import { MinioService } from "nestjs-minio-client";
 
+const NOT_FOUND_CODES = ["NoSuchKey", "NotFound"];
+
 @Injectable()
 export class MinioClientService {
   private readonly minioClient: Minio.Client;
@@ -16,11 +18,20 @@ export class MinioClientService {
     this.bucket = this.configService.get("MINIO_BUCKET_NAME");
   }
 
-  async uploadFile(key: string, file: Buffer, size: number, createdAt: Date, originalName: string, mimeType: string) {
+  async uploadFile(
+    key: string,
+    file: Buffer,
+    size: number,
+    createdAt: Date,
+    originalName: string,
+    mimeType: string,
+    extraMetaData: Record<string, string> = {}
+  ) {
     const metaData = {
       "Content-Type": mimeType,
       createdAt: createdAt.toUTCString(),
       originalName: encodeURI(originalName),
+      ...extraMetaData,
     };
 
     try {
@@ -42,6 +53,19 @@ export class MinioClientService {
     try {
       return await this.minioClient.getObject(this.bucket, key);
     } catch (err) {
+      throw new BadRequestException(err.message);
+    }
+  }
+
+  /**
+   * 저장소에 객체가 있으면 메타데이터를, 없으면 null을 반환한다.
+   * 메타데이터 키는 소문자로 내려온다. (예: reuploaded-at)
+   */
+  async statFile(key: string): Promise<Minio.BucketItemStat | null> {
+    try {
+      return await this.minioClient.statObject(this.bucket, key);
+    } catch (err) {
+      if (NOT_FOUND_CODES.includes(err.code)) return null;
       throw new BadRequestException(err.message);
     }
   }
