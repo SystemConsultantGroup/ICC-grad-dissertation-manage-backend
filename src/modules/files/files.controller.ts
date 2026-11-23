@@ -27,7 +27,7 @@ import { CommonResponseDto } from "../../common/dtos/common-response.dto";
 import { UseUserTypeGuard } from "../auth/decorators/user-type-guard.decorator";
 import { User, UserType } from "@prisma/client";
 import { CurrentUser } from "src/common/decorators/current-user.decorator";
-import { ReuploadTargetListDto } from "./dtos/reupload-target.dto";
+import { AdminReuploadStatusDto, ReuploadTargetListDto } from "./dtos/reupload-target.dto";
 
 @ApiTags("파일 API")
 @ApiBearerAuth("access-token")
@@ -95,6 +95,21 @@ export class FilesController {
     const items = await this.filesService.getMyReuploadTargets(user);
 
     return new CommonResponseDto({ items });
+  }
+
+  @Get("reupload")
+  @UseUserTypeGuard([UserType.ADMIN])
+  @ApiOperation({
+    summary: "전체 학생 재업로드 현황 조회 (관리자)",
+    description:
+      "학생별로 재업로드가 필요한 파일·마친 파일·정상 보관 파일 수와 파일별 상태를 조회한다.\n\n" +
+      "저장소를 직접 확인하므로 학생 수에 따라 응답에 수 초가 걸릴 수 있다.",
+  })
+  @ApiOkResponse({ type: AdminReuploadStatusDto })
+  async getReuploadStatusForAdmin() {
+    const status = await this.filesService.getReuploadStatusForAdmin();
+
+    return new CommonResponseDto(status);
   }
 
   @Put("reupload/:uuid")
