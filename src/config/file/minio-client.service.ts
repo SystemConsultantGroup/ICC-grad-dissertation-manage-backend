@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import * as Minio from "minio";
 import { MinioService } from "nestjs-minio-client";
@@ -53,9 +53,6 @@ export class MinioClientService {
     try {
       return await this.minioClient.getObject(this.bucket, key);
     } catch (err) {
-      if (NOT_FOUND_CODES.includes(err.code)) {
-        throw new NotFoundException("저장소에서 파일을 찾을 수 없습니다.");
-      }
       throw new BadRequestException(err.message);
     }
   }

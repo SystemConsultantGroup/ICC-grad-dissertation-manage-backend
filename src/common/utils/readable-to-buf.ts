@@ -5,7 +5,7 @@ export const readableToBuffer = async (readable: internal.Readable) => {
   let buffer: Buffer;
   const chunks = [];
 
-  const streamToBuf = new Promise((resolve) => {
+  const streamToBuf = new Promise((resolve, reject) => {
     readable.on("data", (chunk) => {
       chunks.push(chunk);
     });
@@ -13,6 +13,7 @@ export const readableToBuffer = async (readable: internal.Readable) => {
       buffer = Buffer.concat(chunks);
       resolve(null);
     });
+    readable.on("error", reject);
   });
   await streamToBuf;
 
