@@ -149,6 +149,7 @@ export class FilesService {
       await Promise.all(
         existingFileIds.slice(i, i + CONCURRENCY).map(async (key) => {
           const stat = await this.minioClientService.statFile(key);
+          if (!stat) existingKeys.delete(key);
           const reuploadedAt = stat?.metaData?.[REUPLOADED_AT_KEY];
           reuploadedAtByKey.set(key, reuploadedAt ? new Date(reuploadedAt) : null);
         })
