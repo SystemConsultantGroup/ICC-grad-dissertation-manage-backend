@@ -6,7 +6,12 @@ import { PrismaService } from "src/config/database/prisma.service";
 import { MinioClientService } from "src/config/file/minio-client.service";
 import { v1 } from "uuid";
 import { FileDto } from "./dtos/file.dto";
-import { ReuploadStatus, ReuploadTargetDto } from "./dtos/reupload-target.dto";
+import {
+  AdminReuploadStatusDto,
+  AdminReuploadStudentDto,
+  ReuploadStatus,
+  ReuploadTargetDto,
+} from "./dtos/reupload-target.dto";
 
 // 저장소 객체 메타데이터 키 (statObject 는 소문자 키로 돌려준다)
 const REUPLOADED_AT_KEY = "reuploaded-at";
@@ -113,6 +118,100 @@ export class FilesService {
         };
       })
     );
+  }
+
+  /**
+   * 관리자용 전체 학생 재업로드 현황.
+   * 버킷 key 목록을 한 번 조회해 없는 파일(MISSING)을 가리고,
+   * 남아 있는 파일만 메타데이터를 읽어 재업로드(REUPLOADED)와 정상 보관(OK)을 구분한다.
+   */
+  async getReuploadStatusForAdmin(): Promise<AdminReuploadStatusDto> {
+    const [thesisFiles, existingKeys] = await Promise.all([
+      this.prismaService.thesisFile.findMany({
+        where: {
+          fileId: { not: null },
+          ThesisInfo: { process: { student: { deletedAt: null } } },
+        },
+        include: {
+          file: true,
+          ThesisInfo: { include: { process: { include: { student: { include: { department: true } } } } } },
+        },
+        orderBy: [{ ThesisInfo: { stage: "asc" } }, { type: "asc" }],
+      }),
+      this.minioClientService.listFileKeys(),
+    ]);
+
+    // 남아 있는 객체만 메타데이터 조회 (동시 요청 수 제한)
+    const reuploadedAtByKey = new Map<string, Date | null>();
+    const existingFileIds = thesisFiles.map((tf) => tf.fileId).filter((key) => existingKeys.has(key));
+    const CONCURRENCY = 10;
+    for (let i = 0; i < existingFileIds.length; i += CONCURRENCY) {
+      await Promise.all(
+        existingFileIds.slice(i, i + CONCURRENCY).map(async (key) => {
+          const stat = await this.minioClientService.statFile(key);
+          if (!stat) existingKeys.delete(key);
+          const reuploadedAt = stat?.metaData?.[REUPLOADED_AT_KEY];
+          reuploadedAtByKey.set(key, reuploadedAt ? new Date(reuploadedAt) : null);
+        })
+      );
+    }
+
+    const students = new Map<number, AdminReuploadStudentDto>();
+    for (const thesisFile of thesisFiles) {
+      const student = thesisFile.ThesisInfo?.process?.student;
+      if (!student) continue;
+
+      const exists = existingKeys.has(thesisFile.fileId);
+      const reuploadedAt = exists ? reuploadedAtByKey.get(thesisFile.fileId) ?? null : null;
+      const status = !exists ? ReuploadStatus.MISSING : reuploadedAt ? ReuploadStatus.REUPLOADED : ReuploadStatus.OK;
+
+      let row = students.get(student.id);
+      if (!row) {
+        row = {
+          studentId: student.id,
+          loginId: student.loginId,
+          name: student.name,
+          department: student.department?.name ?? null,
+          missingCount: 0,
+          reuploadedCount: 0,
+          okCount: 0,
+          lastReuploadedAt: null,
+          files: [],
+        };
+        students.set(student.id, row);
+      }
+
+      if (status === ReuploadStatus.MISSING) row.missingCount++;
+      else if (status === ReuploadStatus.REUPLOADED) row.reuploadedCount++;
+      else row.okCount++;
+      if (reuploadedAt && (!row.lastReuploadedAt || reuploadedAt > row.lastReuploadedAt)) {
+        row.lastReuploadedAt = reuploadedAt;
+      }
+      row.files.push({
+        thesisFileId: thesisFile.id,
+        stage: thesisFile.ThesisInfo.stage,
+        type: thesisFile.type,
+        fileName: thesisFile.file?.name ?? null,
+        status,
+        reuploadedAt,
+      });
+    }
+
+    const items = [...students.values()].sort(
+      (a, b) => b.missingCount - a.missingCount || a.loginId.localeCompare(b.loginId)
+    );
+    const affected = items.filter((s) => s.missingCount + s.reuploadedCount > 0);
+
+    return {
+      summary: {
+        studentCount: items.length,
+        affectedStudentCount: affected.length,
+        completedStudentCount: affected.filter((s) => s.missingCount === 0).length,
+        missingFileCount: items.reduce((sum, s) => sum + s.missingCount, 0),
+        reuploadedFileCount: items.reduce((sum, s) => sum + s.reuploadedCount, 0),
+      },
+      items,
+    };
   }
 
   /**

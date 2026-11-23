@@ -69,4 +69,17 @@ export class MinioClientService {
       throw new BadRequestException(err.message);
     }
   }
+
+  /** 버킷에 있는 모든 객체 key 집합. 객체마다 statFile 을 부르지 않고 존재 여부를 한 번에 확인할 때 쓴다. */
+  async listFileKeys(): Promise<Set<string>> {
+    return new Promise((resolve, reject) => {
+      const keys = new Set<string>();
+      const stream = this.minioClient.listObjectsV2(this.bucket, "", true);
+      stream.on("data", (item) => {
+        if (item.name) keys.add(item.name);
+      });
+      stream.on("error", (err) => reject(new BadRequestException(err.message)));
+      stream.on("end", () => resolve(keys));
+    });
+  }
 }
